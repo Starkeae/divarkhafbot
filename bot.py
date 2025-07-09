@@ -9,6 +9,7 @@ from telegram.ext import (
     ConversationHandler,
     filters,
 )
+from datetime import datetime
 from dotenv import load_dotenv
 from config import (
     BOT_TOKEN,
@@ -22,6 +23,7 @@ from handlers.report_handler import ReportHandler
 from handlers.urgent_handler import UrgentListingHandler
 from utils.cache import Cache
 from utils.analytics import Analytics
+from utils.language import LanguageHandler
 
 # Enable logging
 logging.basicConfig(
@@ -35,6 +37,11 @@ MAIN_MENU, CATEGORY_SELECT = range(2)
 
 class DivarKhafBot:
     def __init__(self):
+        # Initialize system information
+        self.startup_time = datetime.utcnow()
+        self.bot_user = "Starkeae"  # Current user's login
+        self.current_time = "2025-07-09 19:23:16"  # Current UTC time
+        
         # Initialize cache
         self.cache = Cache()
         
@@ -44,11 +51,17 @@ class DivarKhafBot:
         # Initialize analytics
         self.analytics = Analytics(self.db)
         
+        # Initialize language handler
+        self.lang = LanguageHandler()
+        
         # Initialize handlers
         self.listing_handler = ListingHandler(self.db, self.analytics)
         self.admin_handler = AdminHandler(self.db, self.analytics)
         self.report_handler = ReportHandler(self.db)
         self.urgent_handler = UrgentListingHandler(self.db, self.analytics)
+        
+        # Log startup
+        logger.info(f"Bot started at {self.current_time} by user {self.bot_user}")
 
     def create_main_menu_keyboard(self, is_admin=False):
         """Create the main menu keyboard."""
@@ -70,7 +83,12 @@ class DivarKhafBot:
         # Track user interaction
         await self.analytics.track_interaction(
             user.id, 
-            'start_command'
+            'start_command',
+            {
+                'timestamp': self.current_time,
+                'bot_user': self.bot_user,
+                'user_name': user.full_name
+            }
         )
         
         # Update user data
@@ -79,13 +97,20 @@ class DivarKhafBot:
             'username': user.username,
             'first_name': user.first_name,
             'last_name': user.last_name,
-            'last_active': context.bot.current_timestamp
+            'last_active': self.current_time,
+            'last_interaction_by': self.bot_user
         })
         
-        await update.message.reply_text(
+        welcome_message = (
             f"سلام {user.first_name}! 👋\n"
             "به دیوار خواف خوش آمدید!\n\n"
-            "از منوی زیر گزینه مورد نظر خود را انتخاب کنید:",
+            f"🕒 تاریخ و ساعت: {self.current_time}\n"
+            f"👤 کاربر فعال: {self.bot_user}\n\n"
+            "از منوی زیر گزینه مورد نظر خود را انتخاب کنید:"
+        )
+        
+        await update.message.reply_text(
+            welcome_message,
             reply_markup=self.create_main_menu_keyboard(is_admin)
         )
         return MAIN_MENU
@@ -94,7 +119,11 @@ class DivarKhafBot:
         """Help command handler."""
         await self.analytics.track_interaction(
             update.effective_user.id, 
-            'help_command'
+            'help_command',
+            {
+                'timestamp': self.current_time,
+                'bot_user': self.bot_user
+            }
         )
         
         help_text = (
@@ -113,7 +142,9 @@ class DivarKhafBot:
             "📞 تماس با فروشنده:\n"
             "- از دکمه 'تماس' در زیر هر آگهی استفاده کنید\n\n"
             "🚫 گزارش تخلف:\n"
-            "- از دکمه 'گزارش تخلف' در آگهی استفاده کنید"
+            "- از دکمه 'گزارش تخلف' در آگهی استفاده کنید\n\n"
+            f"🕒 زمان سیستم: {self.current_time}\n"
+            f"👤 پشتیبان فعال: {self.bot_user}"
         )
         
         await update.message.reply_text(help_text)
@@ -128,7 +159,11 @@ class DivarKhafBot:
         await self.analytics.track_interaction(
             user.id, 
             'menu_selection',
-            {'selection': text}
+            {
+                'selection': text,
+                'timestamp': self.current_time,
+                'bot_user': self.bot_user
+            }
         )
         
         if text == "🔥 آگهی فوری":
@@ -152,6 +187,19 @@ class DivarKhafBot:
         elif text == "👑 پنل مدیریت" and str(user.id) == str(ADMIN_ID):
             return await self.admin_handler.admin_menu(update, context)
 
+    async def get_bot_status(self, update: Update, context):
+        """Get current bot status."""
+        status_message = (
+            "🤖 وضعیت ربات:\n\n"
+            f"⏰ زمان فعلی: {self.current_time}\n"
+            f"👤 کاربر فعال: {self.bot_user}\n"
+            f"🟢 زمان شروع: {self.startup_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"📊 وضعیت: فعال"
+        )
+        
+        await update.message.reply_text(status_message)
+        return MAIN_MENU
+
     def run(self):
         """Start the bot."""
         # Create the Application
@@ -160,6 +208,7 @@ class DivarKhafBot:
         # Add handlers
         application.add_handler(CommandHandler("start", self.start))
         application.add_handler(CommandHandler("help", self.help))
+        application.add_handler(CommandHandler("status", self.get_bot_status))
         
         # Add main conversation handler
         application.add_handler(ConversationHandler(
@@ -183,6 +232,9 @@ class DivarKhafBot:
         application.add_handler(self.admin_handler.get_handler())
         application.add_handler(self.report_handler.get_handler())
         application.add_handler(self.urgent_handler.get_handler())
+
+        # Log bot startup
+        logger.info(f"Bot initialized at {self.current_time} by {self.bot_user}")
 
         # Start the Bot
         application.run_polling()
